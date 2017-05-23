@@ -5,8 +5,9 @@
 #include "qimagemaker.h"
 #include <QCoreApplication>
 #include <QFileDialog>
-#include <QStandardPaths>
 #include <QMessageBox>
+#include <QFileInfo>
+#include <QtConcurrent/QtConcurrent>
 #include <opencv2/core/core.hpp>
 #include <opencv2/calib3d/calib3d.hpp>
 #include <opencv2/highgui/highgui.hpp>
@@ -17,11 +18,41 @@ MainWindow::MainWindow(QWidget *parent) :
     ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+    mydisp = new QLabel(this);
+    mydisp->hide();
 }
 
 MainWindow::~MainWindow()
 {
     delete ui;
+}
+
+void MainWindow::ComputeDisparityMap(){
+    int min_disparity = ui->MinDisparity->text().toInt();
+    int max_disparity = ui->MaxDisparity->text().toInt();
+    int window_size = ui->WindowSize->text().toInt();
+
+    QImage left_image(left_image_path);
+    QImage right_image(right_image_path);
+    mycv::Image left(left_image);
+    mycv::Image right(right_image);
+    auto disparity = mycv::getDisparityMap(left, right, window_size, min_disparity, max_disparity);
+    disparity = disparity.getNormalized();
+    QImage qimage_disp = mycv::toQImage(disparity);
+
+    QPixmap MYpm = QPixmap::fromImage(qimage_disp);
+    MYpm = MYpm.scaled(300, 300, Qt::KeepAspectRatio, Qt::FastTransformation);
+    mydisp->setPixmap(MYpm);
+
+    QString str = base_path;
+    str += "\/selfmade_disparity_map.png";
+    int i = 1;
+    while(QFileInfo::exists(str)){
+        str = base_path + "\/selfmade_disparity_map(" + QString::number(i) + ").png";
+        i++;
+    }
+    qimage_disp.save(str);
+    status->setText("Done, disparity maps saved to " + base_path);
 }
 
 void MainWindow::on_ComputeButton_clicked()
@@ -47,6 +78,9 @@ void MainWindow::on_ComputeButton_clicked()
         QMessageBox::critical(this, "No images", "Images are not loaded");
         return;
     }
+    status = new QLabel(this);
+    status->setText("Computing...");
+    ui->statusBar->addWidget(status);
     cv::Mat img1, img2, g1, g2;
     cv::Mat disp, disp8;
     img1 = cv::imread(left_image_path.toStdString().c_str());
@@ -70,29 +104,22 @@ void MainWindow::on_ComputeButton_clicked()
     QPixmap OCVpm = QPixmap::fromImage(img);
     OCVpm = OCVpm.scaled(300, 300, Qt::KeepAspectRatio, Qt::FastTransformation);
     OCVlabel->setGeometry(10, 360, OCVpm.width(), OCVpm.height());
+    mydisp->setGeometry(330, 360, OCVpm.width(), OCVpm.height());
     OCVlabel->setPixmap(OCVpm);
     OCVlabel->show();
 
-    QImage left_image(left_image_path);
-    QImage right_image(right_image_path);
-    mycv::Image left(left_image);
-    mycv::Image right(right_image);
-    auto disparity = mycv::getDisparityMap(left, right, window_size, min_disparity, max_disparity);
-    disparity = disparity.getNormalized();
-    QImage qimage_disp = mycv::toQImage(disparity);
-    QPixmap MYpm = QPixmap::fromImage(qimage_disp);
-    QLabel* MYlabel = new QLabel(this);
-    MYpm = MYpm.scaled(300, 300, Qt::KeepAspectRatio, Qt::FastTransformation);
-    MYlabel->setGeometry(330, 360, MYpm.width(), MYpm.height());
-    MYlabel->setPixmap(MYpm);
-    MYlabel->show();
+    QFuture<void> future = QtConcurrent::run(this, &MainWindow::ComputeDisparityMap);
 
-    QString str1 = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
-    QString str2 = str1;
-    str1 += "\/ocv_disparity.png";
-    str2 += "\/selfmade_disparity.png";
-    qimage_disp.save(str2);
-    img.save(str1);
+    QString str;
+    str = base_path;
+    str += "\/ocv_disparity_map.png";
+    int i = 1;
+    while(QFileInfo::exists(str)){
+        str = base_path + "\/ocv_disparity_map(" + QString::number(i) + ").png";
+        i++;
+    }
+    img.save(str);
+    mydisp->show();
 }
 
 void MainWindow::on_LeftLoadButton_clicked()
@@ -119,4 +146,9 @@ void MainWindow::on_RightLoadButton_clicked()
     label->setGeometry(330, 30, pm.width(), pm.height());
     label->setPixmap(pm);
     label->show();
+}
+
+void MainWindow::on_SaveDirectory_clicked()
+{
+    base_path = QFileDialog::getExistingDirectory(this, tr("Set save directory"), base_path);
 }
